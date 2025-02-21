@@ -1,4 +1,3 @@
-__pycache__/
-weights/
-/src/groundingdino/__pycache__/
+__pycache__
+weights/*.pth
 *.pyc
