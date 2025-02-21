@@ -29,7 +29,7 @@ MODELS = {
 
 
 class VitDetectionServer(object):
-    def __init__(self, model_path, config, sam_checkpoint, sam_model, box_threshold=0.4, text_threshold=0.3):
+    def __init__(self, model_path, config, sam_checkpoint, sam_model, box_threshold=0.35, text_threshold=0.25):
         torch.cuda.empty_cache()
         if torch.cuda.is_available():    
             self.device = torch.device("cuda")
@@ -77,6 +77,9 @@ class VitDetectionServer(object):
         return np.array(result_masks)
 
     def detect(self, image, text):
+
+        # labels = text.split(',')
+
         # GroundingDINO Model
         # detect objects
         detections, labels = self.grounding_dino_model.predict_with_caption(
@@ -86,15 +89,6 @@ class VitDetectionServer(object):
                     text_threshold=self.text_threshold
                 )
         
-        # >>> yutian >>>
-        phrases = labels
-        if text[-1]=='.':
-            text += ' '
-        classes = text.split('. ')
-        class_id = self.grounding_dino_model.phrases2classes(phrases=phrases, classes=classes)
-        detections.class_id = class_id
-        # <<< yutian <<<
-
         # Segment Anything Model
         # convert detections to masks
         detections.mask = self.segment(
@@ -106,6 +100,11 @@ class VitDetectionServer(object):
         # mask_annotator = sv.MaskAnnotator()
         box_annotator = sv.BoxAnnotator()
         label_annotator = sv.LabelAnnotator()
+
+        result = [
+            f"{labels[class_id]}:{confidence:0.2f}" 
+            for _, _, confidence, class_id, _, _ 
+            in detections]
         
         # annotated_image = mask_annotator.annotate(scene=image.copy(), detections=detections)
         annotated_image = box_annotator.annotate(scene=image.copy(), detections=detections)
@@ -123,8 +122,7 @@ class VitDetectionServer(object):
 
         rospy.loginfo("Detected objects: {}".format(labels))
         rospy.loginfo("Detection scores: {}".format(scores))
-
-        
+        stride = masks.shape[1] * masks.shape[2]
         response = VitDetectionResponse()
         response.labels = labels
         response.class_id = detections.class_id
@@ -132,19 +130,10 @@ class VitDetectionServer(object):
         response.boxes.layout.dim = [MultiArrayDimension(label="boxes", size=boxes.shape[0], stride=4)]
         response.boxes.data = boxes.flatten().tolist()
         response.annotated_frame = self.cv_bridge.cv2_to_imgmsg(annotated_frame)
+        response.segmasks.layout.dim = [MultiArrayDimension(label="masks", size=masks.shape[0], stride=stride)]
+        response.segmasks.data = masks.flatten().tolist()
 
-        # >>> yutian >>>
-        try:
-            stride = masks.shape[1] * masks.shape[2]
-            response.segmasks.layout.dim = [MultiArrayDimension(label="masks", size=masks.shape[0], stride=stride)]
-            response.segmasks.data = masks.flatten().tolist()
-        except:  # no masks, masks.shape=(0,)
-            if masks.size == 0:
-                response.segmasks.layout.dim = [MultiArrayDimension(label="masks", size=0, stride=0)]
-                response.segmasks.data = []
-            else:
-                raise ValueError(f"masks.shape is unexpected {masks.shape}")
-        # <<< yutian <<<
+        
 
         # We release the gpu memory
         torch.cuda.empty_cache()
