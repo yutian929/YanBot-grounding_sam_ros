@@ -24,7 +24,4 @@
       <param name="box_threshold" type="double" value="$(arg box_threshold)" />
       <param name="text_threshold" type="double" value="$(arg text_threshold)" />
   </node>
-
-  <node name="grounding_sam_node" pkg="grounding_sam_ros" type="grounding_sam_node.py" output="screen" >
-  </node>
 </launch>

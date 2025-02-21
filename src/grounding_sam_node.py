@@ -6,7 +6,7 @@ from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 from grounding_sam_ros.client import SamDetector
 from grounding_sam_ros.srv import VitDetection
-from std_srvs.srv import SetBool, SetBoolResponse
+from grounding_sam_ros.srv import UpdatePrompts, UpdatePromptsResponse
 
 class GroundingSAMNode:
     def __init__(self):
@@ -25,11 +25,12 @@ class GroundingSAMNode:
         
         # 标注图像发布
         self.annotated_pub = rospy.Publisher("~annotated", Image, queue_size=1)
+        self.masks_pub = rospy.Publisher("~masks", Image, queue_size=1)
         
         # Prompt更新服务
-        rospy.Service("~update_prompt", SetBool, self.prompt_callback)
+        rospy.Service("~update_prompt", UpdatePrompts, self.prompt_callback)
         
-        # 10Hz检测定时器
+        # 定时器
         rospy.Timer(rospy.Duration(1/15), self.detection_timer_callback)
         
         rospy.loginfo("Node initialization complete")
@@ -45,7 +46,46 @@ class GroundingSAMNode:
         """Prompt更新服务"""
         self.current_prompt = req.data
         rospy.loginfo(f"Updated prompt to: {self.current_prompt}")
-        return SetBoolResponse(success=True, message="Prompt updated")
+        return UpdatePromptsResponse(success=True, message=f"Prompt updated to {self.current_prompt}")
+
+    def apply_mask_overlay(self, image, masks):
+        """将掩码以半透明固定颜色叠加到图像上"""
+        overlay = image.copy()
+        
+        # 定义固定的颜色列表（RGB格式）
+        fixed_colors = [
+            [255, 0, 0],    # 红色
+            [0, 255, 0],    # 绿色
+            [0, 0, 255],    # 蓝色
+            [255, 255, 0],  # 黄色
+            [255, 0, 255],  # 紫色
+            [0, 255, 255],  # 青色
+            [128, 0, 0],    # 深红
+            [0, 128, 0],    # 深绿
+            [0, 0, 128],    # 深蓝
+            [128, 128, 0],  # 橄榄色
+        ]
+        
+        for i, mask in enumerate(masks):
+            # 使用模运算循环选择颜色
+            color = fixed_colors[i % len(fixed_colors)]
+            
+            # 将二值掩码转换为bool类型
+            binary_mask = mask.astype(bool)
+            
+            # 创建颜色掩码
+            color_mask = np.zeros_like(image)
+            color_mask[binary_mask] = color
+            
+            # 使用cv2.addWeighted进行叠加
+            alpha = 0.15  # 透明度
+            cv2.addWeighted(color_mask, alpha, overlay, 1 - alpha, 0, overlay)
+            
+            # 绘制轮廓加强显示
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            cv2.drawContours(overlay, contours, -1, color, 2)
+        
+        return overlay
 
     def detection_timer_callback(self, event):
         """定时检测回调"""
@@ -54,7 +94,8 @@ class GroundingSAMNode:
 
         try:
             # 执行检测
-            annotated, _, _, labels, _ = self.detector.detect(
+            # annotated_frame, boxes, masks, labels, scores
+            annotated, _, masks, labels, _ = self.detector.detect(
                 self.latest_image, 
                 self.current_prompt
             )
@@ -63,6 +104,13 @@ class GroundingSAMNode:
             self.annotated_pub.publish(
                 self.bridge.cv2_to_imgmsg(annotated, "bgr8")
             )
+
+            # 生成掩码叠加图像
+            if len(masks) > 0:
+                mask_overlay = self.apply_mask_overlay(annotated, masks)
+                self.masks_pub.publish(
+                    self.bridge.cv2_to_imgmsg(mask_overlay, "bgr8")
+                )
             
             # 打印检测结果
             if len(labels) > 0:
@@ -79,82 +127,3 @@ if __name__ == '__main__':
         rospy.spin()
     except rospy.ROSInterruptException:
         pass
-
-# #!/usr/bin/env python
-# import rospy
-# from sensor_msgs.msg import Image
-# from std_msgs.msg import String, Float32MultiArray
-# from grounding_sam_ros.srv import VitDetection, VitDetectionResponse, VitDetectionRequest
-# from std_srvs.srv import SetBool, SetBoolResponse
-
-# class GroundingSAMNode:
-#     def __init__(self):
-#         # 初始化节点
-#         rospy.init_node('grounding_sam_node', anonymous=True)
-        
-#         # 存储prompt的成员变量
-#         self.current_prompt = "computer. keyboard. mouse. cellphone."  # 默认提示词
-        
-#         # 订阅RGB图像话题
-#         self.color_image = None
-#         rospy.Subscriber("/camera/color/image_raw", Image, self.image_callback)
-        
-#         # 发布标注后的图像
-#         self.annotated_pub = rospy.Publisher("/annotated_frames", Image, queue_size=10)
-        
-#         # 创建prompt更新服务
-#         rospy.Service('update_prompt', SetBool, self.handle_prompt_update)
-        
-#         # 创建VitDetection服务客户端
-#         rospy.wait_for_service('vit_detection')
-#         self.vit_client = rospy.ServiceProxy('vit_detection', VitDetection)
-        
-#         rospy.loginfo("Node initialized")
-
-#     def image_callback(self, msg):
-#         """图像话题回调函数"""
-#         self.color_image = msg
-#         # rospy.logdebug("Received new color image")
-
-#     def handle_prompt_update(self, req):
-#         """Prompt更新服务回调"""
-#         # 这里使用SetBool服务的data字段携带新prompt（需转为字符串）
-#         new_prompt = str(req.data)
-#         self.current_prompt = new_prompt
-#         rospy.loginfo(f"Prompt updated to: {new_prompt}")
-#         return SetBoolResponse(success=True, message="Prompt updated")
-
-#     def process_results(self, response):
-#         """专用结果处理函数（可扩展升级）"""
-#         # 当前仅发布标注后的图像
-#         if response.annotated_frame is not None:
-#             self.annotated_pub.publish(response.annotated_frame)
-#             rospy.logdebug("Published annotated frame")
-
-#     def run_detection(self):
-#         """主检测逻辑"""
-#         rate = rospy.Rate(10)  # 10Hz
-#         while not rospy.is_shutdown():
-#             if self.color_image is not None:
-#                 try:
-#                     # 构建服务请求
-#                     req = VitDetectionRequest()
-#                     req.color_image = self.color_image
-#                     req.prompt = self.current_prompt
-                    
-#                     # 调用服务
-#                     response = self.vit_client(req)
-                    
-#                     # 处理返回数据
-#                     self.process_results(response)
-                    
-#                 except rospy.ServiceException as e:
-#                     rospy.logerr(f"Service call failed: {e}")
-#             rate.sleep()
-
-# if __name__ == '__main__':
-#     try:
-#         node = GroundingSAMNode()
-#         node.run_detection()
-#     except rospy.ROSInterruptException:
-#         pass
