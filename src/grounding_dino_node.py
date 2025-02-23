@@ -26,7 +26,7 @@ class GroundingSAMNode:
         # 标注图像发布
         self.annotated_pub = rospy.Publisher("~annotated", Image, queue_size=1)
         self.masks_pub = rospy.Publisher("~masks", Image, queue_size=1)
-        
+
         # Prompt更新服务
         rospy.Service("~update_prompt", UpdatePrompt, self.prompt_callback)
         
