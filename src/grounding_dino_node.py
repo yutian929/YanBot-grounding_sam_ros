@@ -44,9 +44,64 @@ class GroundingSAMNode:
 
     def prompt_callback(self, req):
         """Prompt更新服务"""
-        self.current_prompt = req.data
-        rospy.loginfo(f"Updated prompt to: {self.current_prompt}")
-        return UpdatePromptResponse(success=True, message=f"Prompt updated to {self.current_prompt}")
+        original_prompt = self.current_prompt  # 保留原值用于异常恢复
+        
+        try:
+            # CASE 1: 直接赋值操作 =
+            if req.data.startswith('='):
+                new_prompt = req.data[1:].strip()  # 移除=号和首尾空格
+                self.current_prompt = new_prompt
+                rospy.loginfo(f"[Prompt SET] => {self.current_prompt}")
+                return UpdatePromptResponse(
+                    success=True,
+                    message=f"Prompt SET: {self.current_prompt}"
+                )
+
+            # CASE 2: 追加操作 +
+            elif req.data.startswith('+'):
+                append_str = req.data[1:].strip()  # 移除+号和首尾空格
+                
+                # 空内容检查
+                if not append_str:
+                    rospy.logwarn("Empty append content")
+                    return UpdatePromptResponse(
+                        success=False,
+                        message="Append content cannot be empty"
+                    )
+                
+                # 智能空格拼接
+                if self.current_prompt:
+                    if not self.current_prompt.endswith(' '):
+                        append_str = ' ' + append_str
+                    self.current_prompt += append_str
+                else:
+                    self.current_prompt = append_str
+                    
+                rospy.loginfo(f"[Prompt APPEND] => {self.current_prompt}")
+                return UpdatePromptResponse(
+                    success=True,
+                    message=f"Appended: {append_str}, current prompt: {self.current_prompt}"
+                )
+
+            # CASE 3: 非法操作
+            else:
+                rospy.logwarn(f"Illegal syntax: {req.data}")
+                return UpdatePromptResponse(
+                    success=False,
+                    message="Invalid syntax. Start with '=' to SET or '+' to APPEND.\n"
+                            "Example:\n"
+                            "  = chair. table.\n"
+                            "  + lamp. book."
+                )
+
+        except Exception as e:
+            # 异常恢复机制
+            self.current_prompt = original_prompt
+            rospy.logerr(f"Prompt update failed: {str(e)}")
+            return UpdatePromptResponse(
+                success=False,
+                message=f"Critical error: {str(e)}"
+            )
 
     def apply_mask_overlay(self, image, masks):
         """将掩码以半透明固定颜色叠加到图像上"""
