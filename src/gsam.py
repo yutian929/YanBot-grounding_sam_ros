@@ -121,8 +121,8 @@ class VitDetectionServer(object):
         scores = detections.confidence
         masks = detections.mask
 
-        rospy.loginfo("Detected objects: {}".format(labels))
-        rospy.loginfo("Detection scores: {}".format(scores))
+        # rospy.loginfo("Detected objects: {}".format(labels))
+        # rospy.loginfo("Detection scores: {}".format(scores))
 
         
         response = VitDetectionResponse()

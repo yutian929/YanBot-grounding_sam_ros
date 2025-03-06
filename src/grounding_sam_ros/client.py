@@ -28,7 +28,7 @@ class SamDetector():
     def detect(self, rgb, text):
         rgb_msg = self.cv_bridge.cv2_to_imgmsg(np.array(rgb))
         results = self.vit_detection(rgb_msg, text)
-        rospy.loginfo('Detected Objects: {}' .format(results.labels))
+        # rospy.loginfo('Detected Objects: {}' .format(results.labels))
         labels = results.labels
         scores = results.scores
         boxes = results.boxes
